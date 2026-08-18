@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Road Sign Spotter</title>
+<style>
+  :root {
+    --bg: #0f1720;
+    --panel: #16202b;
+    --panel-2: #1c2836;
+    --accent: #22c55e;
+    --accent-dim: #16a34a;
+    --text: #e5e9f0;
+    --text-dim: #94a3b8;
+    --border: #2a3949;
+    --warn: #f59e0b;
+    --danger: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    padding: 14px 20px; background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  #modelStatus {
+    font-size: 13px; padding: 6px 12px; border-radius: 20px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+  }
+  #modelStatus.ready { color: var(--accent); border-color: var(--accent-dim); }
+  #modelStatus.loading { color: var(--warn); }
+  #modelStatus.error { color: var(--danger); }
+  #btnRetryAI {
+    display: none; background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  #btnRetryAI:hover { background: #223347; }
+  #modelStatus.error #btnRetryAI { display: inline-block; }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 20px; display: grid; gap: 18px; }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px;
+  }
+  .card h2 { margin: 0 0 12px; font-size: 15px; color: var(--text-dim); font-weight: 600; }
+
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+  button {
+    background: var(--accent); color: #06210f; border: none; padding: 10px 18px;
+    border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px;
+  }
+  button:hover { background: var(--accent-dim); }
+  button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  button.secondary:hover { background: #223347; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  input[type="text"] {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 12px; border-radius: 8px; font-size: 14px; width: 100%;
+  }
+
+  #progressWrap { display: none; margin-top: 10px; }
+  #progressBar { height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+  #progressFill { height: 100%; width: 0%; background: var(--accent); transition: width .2s; }
+  #progressText { font-size: 12px; color: var(--text-dim); margin-top: 6px; }
+
+  #captureArea { position: relative; display: none; margin-top: 14px; }
+  #frameCanvas, #selectCanvas { max-width: 100%; border-radius: 8px; }
+  #selectCanvas { position: absolute; top: 0; left: 0; cursor: crosshair; }
+
+  #liveVideo { display: none; max-width: 100%; border-radius: 8px; }
+
+  #cropPreview { display: flex; align-items: center; gap: 14px; margin-top: 14px; display: none; }
+  #cropPreview img { max-height: 90px; border-radius: 6px; border: 1px solid var(--border); }
+
+  #resultsGrid { display: grid; gap: 8px; margin-top: 10px; max-height: 480px; overflow-y: auto; }
+  .result-row {
+    display: flex; gap: 12px; align-items: center; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; cursor: pointer;
+  }
+  .result-row:hover { border-color: var(--accent-dim); }
+  .result-row.best { border-color: var(--accent); background: #142a1c; }
+  .result-row img { width: 56px; height: 56px; object-fit: contain; background: #fff; border-radius: 6px; }
+  .result-row .info { flex: 1; }
+  .result-row .name { font-weight: 600; font-size: 14px; }
+  .result-row .meta { font-size: 12px; color: var(--text-dim); }
+  .result-row .score { font-size: 12px; color: var(--accent); font-weight: 600; min-width: 46px; text-align: right; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-dim); font-weight: 600; }
+  #logEmpty { color: var(--text-dim); font-size: 13px; padding: 10px 0; }
+
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text-dim); }
+  .badge.ai { color: var(--accent); border-color: var(--accent-dim); }
+  .badge.manual { color: var(--warn); border-color: var(--warn); }
+
+  .hint { font-size: 12px; color: var(--text-dim); margin-top: 8px; line-height: 1.6; }
+  .flash { color: var(--accent); font-weight: 600; padding: 10px; text-align: center; }
+  .error-text { color: var(--danger); font-weight: 600; padding: 10px; text-align: center; }
+</style>
+</head>
+<body>
+
+<script>
+  // Safety net: if the module script below fails to load or run for any
+  // reason (bad CDN URL, network block, etc.), the buttons would otherwise
+  // stay silently dead. Show a clear error instead of a frozen page.
+  setTimeout(function () {
+    var el = document.getElementById("modelStatus");
+    if (el && el.classList.contains("loading") && el.textContent.indexOf("Preparing AI") !== -1) {
+      el.className = "error";
+      el.innerHTML = '⚠️ Page failed to start — check your internet connection and refresh. <button id="btnRetryAI" onclick="location.reload()">↻ Retry</button>';
+    }
+  }, 8000);
+</script>
+
+<header>
+  <h1>🚦 Road Sign Spotter</h1>
+  <div id="modelStatus" class="loading">⏳ Preparing AI... <button id="btnRetryAI">↻ Retry</button></div>
+</header>
+
+<main>
+
+  <div class="card">
+    <h2>1) Add a photo</h2>
+    <div class="row">
+      <button id="btnUpload">📁 Upload sign photo</button>
+      <button id="btnCapture" class="secondary">🖥️ Capture from screen</button>
+      <input type="file" id="fileInput" accept="image/*" style="display:none">
+    </div>
+    <div class="hint">
+      <b>Upload:</b> pick a photo of the sign from your device.<br>
+      <b>Capture:</b> share a video/screen and draw a box around the sign.
+    </div>
+
+    <video id="liveVideo" autoplay muted></video>
+    <div class="row" id="captureControls" style="display:none; margin-top:10px;">
+      <button id="btnFreeze">📸 Capture frame</button>
+      <button id="btnStopShare" class="secondary">Stop sharing</button>
+    </div>
+
+    <div id="captureArea">
+      <canvas id="frameCanvas"></canvas>
+      <canvas id="selectCanvas"></canvas>
+    </div>
+    <div class="hint" id="selectHint" style="display:none;">Drag a box around the sign.</div>
+
+    <div id="cropPreview">
+      <img id="cropImg" alt="crop preview">
+      <div>
+        <div style="font-weight:600;">Selected crop</div>
+        <div class="hint" style="margin:0;" id="cropStatus">Analyzing...</div>
+      </div>
+    </div>
+
+    <div id="progressWrap">
+      <div id="progressBar"><div id="progressFill"></div></div>
+      <div id="progressText"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2) Results</h2>
+    <input type="text" id="searchBox" placeholder="Or search by name / code / number...">
+    <div id="resultsGrid"><div class="hint">Upload or capture a sign to see matches here.</div></div>
+  </div>
+
+  <div class="card">
+    <h2>3) Log (<span id="logCount">0</span>)</h2>
+    <div class="row" style="margin-bottom:10px;">
+      <button id="btnExport" class="secondary">⬇️ Export CSV</button>
+      <button id="btnClearLog" class="secondary">🗑️ Clear log</button>
+    </div>
+    <div id="logEmpty">No signs logged yet.</div>
+    <table id="logTable" style="display:none;">
+      <thead><tr><th>Time</th><th>#</th><th>Name</th><th>Code</th><th>Category</th><th>Source</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+</main>
+
+<script type="module">
+import { pipeline, RawImage, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2";
+
+env.allowLocalModels = false;
+
+const MODEL_ID = "Xenova/clip-vit-base-patch32";
+const EMB_CACHE_KEY = "rss_catalog_embeddings_v2";
+const LOG_KEY = "rss_results_log_v1";
+
+let catalog = [];
+let catalogEmbeddings = null; // {global_id: Float32Array-as-array}
+let extractor = null;
+let aiReady = false;
+let currentStream = null;
+
+const $ = (id) => document.getElementById(id);
+const modelStatus = $("modelStatus");
+const btnRetryAI = $("btnRetryAI");
+const progressWrap = $("progressWrap");
+const progressFill = $("progressFill");
+const progressText = $("progressText");
+
+function setModelStatus(text, cls) {
+  modelStatus.firstChild.textContent = text + " ";
+  modelStatus.className = cls;
+}
+
+function setProgress(pct, text) {
+  progressWrap.style.display = pct >= 100 || pct <= 0 ? "none" : "block";
+  progressFill.style.width = pct + "%";
+  progressText.textContent = text || "";
+}
+
+// ---------------------------------------------------------------
+// Load catalog + init model + build/restore embeddings cache
+// ---------------------------------------------------------------
+async function init() {
+  try {
+    const res = await fetch("catalog.json");
+    catalog = await res.json();
+  } catch (e) {
+    setModelStatus("⚠️ Can't find catalog.json", "error");
+    return;
+  }
+
+  try {
+    setModelStatus("⏳ Downloading AI model (~90MB, once only)...", "loading");
+    extractor = await pipeline("image-feature-extraction", MODEL_ID, {
+      quantized: true,
+      progress_callback: (p) => {
+        if (p.status === "progress" && p.total) {
+          const pct = Math.round((p.loaded / p.total) * 100);
+          setProgress(pct, `Downloading ${p.file || "model"}: ${pct}%`);
+        }
+      },
+    });
+    aiReady = true;
+  } catch (e) {
+    console.error(e);
+    setModelStatus("⚠️ AI failed to load — using simple color match", "error");
+    aiReady = false;
+  }
+
+  await loadOrBuildCatalogEmbeddings();
+
+  if (aiReady && (!catalogEmbeddings || !Object.keys(catalogEmbeddings).length)) {
+    setModelStatus("⚠️ AI loaded but catalog matching failed — using search/color match", "error");
+    aiReady = false;
+  } else if (aiReady) {
+    setModelStatus("✅ AI ready", "ready");
+  }
+  setProgress(0, "");
+  renderLog();
+}
+
+btnRetryAI.addEventListener("click", (e) => {
+  e.stopPropagation();
+  init();
+});
+
+async function embedFromDataURL(dataURL) {
+  const output = await extractor(dataURL, { pooling: "mean", normalize: true });
+  return Array.from(output.data);
+}
+
+function cosineSim(a, b) {
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+  return dot; // vectors are already L2-normalized -> dot product == cosine similarity
+}
+
+async function loadOrBuildCatalogEmbeddings() {
+  const cached = localStorage.getItem(EMB_CACHE_KEY);
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached);
+      if (parsed.count === catalog.length && parsed.data && Object.keys(parsed.data).length > 0) {
+        catalogEmbeddings = parsed.data;
+        return;
+      }
+    } catch (e) { /* fall through to rebuild */ }
+  }
+
+  if (!aiReady) return; // no AI available, will use color-fallback matching only
+
+  catalogEmbeddings = {};
+  let done = 0;
+  for (const entry of catalog) {
+    if (!entry.image) continue;
+    try {
+      const absoluteUrl = new URL(entry.image, window.location.href).href;
+      const emb = await embedFromDataURL(absoluteUrl);
+      catalogEmbeddings[entry.global_id] = emb;
+    } catch (e) {
+      console.warn("failed to embed", entry.image, e);
+    }
+    done++;
+    const pct = Math.round((done / catalog.length) * 100);
+    setProgress(pct, `Preparing catalog (first run)... ${done}/${catalog.length}`);
+  }
+  try {
+    localStorage.setItem(EMB_CACHE_KEY, JSON.stringify({ count: catalog.length, data: catalogEmbeddings }));
+  } catch (e) {
+    console.warn("could not cache embeddings (storage full?)", e);
+  }
+}
+
+// ---------------------------------------------------------------
+// Fallback: simple average-color + downsized grayscale comparison
+// (used only if the AI model fails to load - keeps the tool usable)
+// ---------------------------------------------------------------
+function simpleImageSignature(canvas) {
+  const c = document.createElement("canvas");
+  c.width = 16; c.height = 16;
+  const ctx = c.getContext("2d");
+  ctx.drawImage(canvas, 0, 0, 16, 16);
+  const data = ctx.getImageData(0, 0, 16, 16).data;
+  const sig = [];
+  for (let i = 0; i < data.length; i += 4) {
+    sig.push(data[i] / 255, data[i + 1] / 255, data[i + 2] / 255);
+  }
+  return sig;
+}
+
+const fallbackSigCache = {};
+async function getFallbackCatalogSig(entry) {
+  if (fallbackSigCache[entry.global_id]) return fallbackSigCache[entry.global_id];
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = img.width; c.height = img.height;
+      c.getContext("2d").drawImage(img, 0, 0);
+      const sig = simpleImageSignature(c);
+      fallbackSigCache[entry.global_id] = sig;
+      resolve(sig);
+    };
+    img.onerror = () => resolve(null);
+    img.src = entry.image;
+  });
+}
+
+function euclidDist(a, b) {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += (a[i] - b[i]) ** 2;
+  return Math.sqrt(s);
+}
+
+// ---------------------------------------------------------------
+// Matching entry point - takes a canvas (the crop) and ranks catalog
+// ---------------------------------------------------------------
+async function matchCrop(cropCanvas) {
+  $("cropStatus").textContent = "Analyzing with AI...";
+
+  if (aiReady && catalogEmbeddings) {
+    try {
+      const dataURL = cropCanvas.toDataURL("image/jpeg", 0.9);
+      const cropEmb = await embedFromDataURL(dataURL);
+      const scored = [];
+      for (const entry of catalog) {
+        const emb = catalogEmbeddings[entry.global_id];
+        if (!emb) continue;
+        scored.push({ entry, score: cosineSim(cropEmb, emb) });
+      }
+      scored.sort((a, b) => b.score - a.score);
+      $("cropStatus").textContent = "✅ AI results (closest match first)";
+      renderResults(scored.slice(0, 12), "ai");
+      return;
+    } catch (e) {
+      console.error("AI matching failed, falling back", e);
+    }
+  }
+
+  // fallback path
+  $("cropStatus").textContent = "⚠️ Simple color match (AI unavailable)";
+  const cropSig = simpleImageSignature(cropCanvas);
+  const scored = [];
+  for (const entry of catalog) {
+    if (!entry.image) continue;
+    const sig = await getFallbackCatalogSig(entry);
+    if (!sig) continue;
+    scored.push({ entry, score: -euclidDist(cropSig, sig) });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  renderResults(scored.slice(0, 12), "fallback");
+}
+
+// ---------------------------------------------------------------
+// Rendering results / search / log
+// ---------------------------------------------------------------
+function renderResults(scoredList, source) {
+  const grid = $("resultsGrid");
+  grid.innerHTML = "";
+  if (!scoredList.length) {
+    grid.innerHTML = '<div class="hint">No results.</div>';
+    return;
+  }
+  scoredList.forEach((item, idx) => {
+    const e = item.entry;
+    const row = document.createElement("div");
+    row.className = "result-row" + (idx === 0 ? " best" : "");
+    const pct = item.score !== undefined && source === "ai" ? Math.round(item.score * 100) : null;
+    row.innerHTML = `
+      <img src="${e.image}" alt="">
+      <div class="info">
+        <div class="name">${idx === 0 ? "⭐ " : ""}${e.name}</div>
+        <div class="meta">${e.category} | ${e.code} | #${e.handwritten_num}</div>
+      </div>
+      ${pct !== null ? `<div class="score">${pct}%</div>` : ""}
+    `;
+    row.addEventListener("click", () => confirmMatch(e, source));
+    grid.appendChild(row);
+  });
+}
+
+function searchCatalog(q) {
+  q = q.trim().toLowerCase();
+  if (!q) return [];
+  return catalog
+    .filter((e) => `${e.global_id} ${e.sn} ${e.name} ${e.code} ${e.handwritten_num} ${e.category}`.toLowerCase().includes(q))
+    .slice(0, 20)
+    .map((e) => ({ entry: e, score: undefined }));
+}
+
+$("searchBox").addEventListener("input", (e) => {
+  const q = e.target.value;
+  if (q.trim()) {
+    renderResults(searchCatalog(q), "manual");
+  } else {
+    $("resultsGrid").innerHTML = '<div class="hint">Upload or capture a sign to see matches here.</div>';
+  }
+});
+
+function confirmMatch(entry, source) {
+  const log = JSON.parse(localStorage.getItem(LOG_KEY) || "[]");
+  log.unshift({
+    ts: new Date().toISOString(),
+    global_id: entry.global_id,
+    name: entry.name,
+    code: entry.code,
+    category: entry.category,
+    handwritten_num: entry.handwritten_num,
+    source,
+  });
+  localStorage.setItem(LOG_KEY, JSON.stringify(log));
+  renderLog();
+
+  const grid = $("resultsGrid");
+  grid.innerHTML = `<div class="flash">✔ Logged: #${entry.handwritten_num} - ${entry.name}</div>`;
+  setTimeout(() => {
+    grid.innerHTML = '<div class="hint">Upload or capture another sign.</div>';
+  }, 1200);
+  $("cropPreview").style.display = "none";
+  $("searchBox").value = "";
+}
+
+function renderLog() {
+  const log = JSON.parse(localStorage.getItem(LOG_KEY) || "[]");
+  $("logCount").textContent = log.length;
+  const table = $("logTable");
+  const empty = $("logEmpty");
+  if (!log.length) {
+    table.style.display = "none";
+    empty.style.display = "block";
+    return;
+  }
+  empty.style.display = "none";
+  table.style.display = "table";
+  const tbody = table.querySelector("tbody");
+  tbody.innerHTML = log
+    .slice(0, 200)
+    .map(
+      (r) => `<tr>
+        <td>${new Date(r.ts).toLocaleString()}</td>
+        <td>${r.handwritten_num}</td>
+        <td>${r.name}</td>
+        <td>${r.code}</td>
+        <td>${r.category}</td>
+        <td><span class="badge ${r.source === "ai" ? "ai" : r.source === "manual" ? "manual" : ""}">${
+          r.source === "ai" ? "AI" : r.source === "manual" ? "Manual" : "Color"
+        }</span></td>
+      </tr>`
+    )
+    .join("");
+}
+
+$("btnExport").addEventListener("click", () => {
+  const log = JSON.parse(localStorage.getItem(LOG_KEY) || "[]");
+  if (!log.length) return;
+  const headers = ["timestamp", "handwritten_num", "name", "code", "category", "global_id", "source"];
+  const rows = [headers.join(",")];
+  for (const r of log) {
+    rows.push(
+      [r.ts, r.handwritten_num, `"${r.name}"`, r.code, r.category, r.global_id, r.source]
+        .join(",")
+    );
+  }
+  const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `road_sign_results_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+$("btnClearLog").addEventListener("click", () => {
+  if (confirm("Clear the entire log?")) {
+    localStorage.removeItem(LOG_KEY);
+    renderLog();
+  }
+});
+
+// ---------------------------------------------------------------
+// Upload image flow
+// ---------------------------------------------------------------
+$("btnUpload").addEventListener("click", () => $("fileInput").click());
+$("fileInput").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = ""; // allow re-selecting the same file later
+  if (!file) return;
+
+  $("cropPreview").style.display = "flex";
+  $("cropImg").removeAttribute("src");
+  $("cropStatus").textContent = "Loading photo...";
+
+  const objectUrl = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = async () => {
+    URL.revokeObjectURL(objectUrl);
+    const canvas = document.createElement("canvas");
+    canvas.width = img.width;
+    canvas.height = img.height;
+    canvas.getContext("2d").drawImage(img, 0, 0);
+    showCropPreview(canvas);
+    await matchCrop(canvas);
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(objectUrl);
+    $("cropStatus").textContent = "⚠️ Couldn't open this photo. Try a JPG or PNG (HEIC/iPhone photos may not open — switch your camera to \"Most Compatible\" format, or take a screenshot first).";
+    $("resultsGrid").innerHTML = '<div class="error-text">Photo could not be loaded.</div>';
+  };
+  img.src = objectUrl;
+});
+
+function showCropPreview(canvas) {
+  $("cropPreview").style.display = "flex";
+  $("cropImg").src = canvas.toDataURL("image/jpeg", 0.85);
+}
+
+// ---------------------------------------------------------------
+// Screen capture + rectangle selection flow
+// ---------------------------------------------------------------
+const liveVideo = $("liveVideo");
+const frameCanvas = $("frameCanvas");
+const selectCanvas = $("selectCanvas");
+const captureArea = $("captureArea");
+
+$("btnCapture").addEventListener("click", async () => {
+  try {
+    currentStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    liveVideo.srcObject = currentStream;
+    liveVideo.style.display = "block";
+    $("captureControls").style.display = "flex";
+    captureArea.style.display = "none";
+    $("selectHint").style.display = "none";
+  } catch (e) {
+    alert("Couldn't start screen sharing. Try Chrome, and make sure the page is opened via an https or localhost link, not a local file.");
+  }
+});
+
+$("btnStopShare").addEventListener("click", stopSharing);
+function stopSharing() {
+  if (currentStream) {
+    currentStream.getTracks().forEach((t) => t.stop());
+    currentStream = null;
+  }
+  liveVideo.style.display = "none";
+  $("captureControls").style.display = "none";
+  captureArea.style.display = "none";
+  $("selectHint").style.display = "none";
+}
+
+$("btnFreeze").addEventListener("click", () => {
+  frameCanvas.width = liveVideo.videoWidth;
+  frameCanvas.height = liveVideo.videoHeight;
+  frameCanvas.getContext("2d").drawImage(liveVideo, 0, 0);
+  selectCanvas.width = frameCanvas.width;
+  selectCanvas.height = frameCanvas.height;
+  captureArea.style.display = "block";
+  $("selectHint").style.display = "block";
+  clearSelection();
+});
+
+let selStart = null;
+let selecting = false;
+const selCtx = selectCanvas.getContext("2d");
+
+function clearSelection() {
+  selCtx.clearRect(0, 0, selectCanvas.width, selectCanvas.height);
+}
+
+selectCanvas.addEventListener("mousedown", (e) => {
+  const rect = selectCanvas.getBoundingClientRect();
+  const scaleX = selectCanvas.width / rect.width;
+  const scaleY = selectCanvas.height / rect.height;
+  selStart = { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+  selecting = true;
+});
+
+selectCanvas.addEventListener("mousemove", (e) => {
+  if (!selecting || !selStart) return;
+  const rect = selectCanvas.getBoundingClientRect();
+  const scaleX = selectCanvas.width / rect.width;
+  const scaleY = selectCanvas.height / rect.height;
+  const cur = { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+  clearSelection();
+  selCtx.strokeStyle = "#22c55e";
+  selCtx.lineWidth = 3;
+  selCtx.strokeRect(selStart.x, selStart.y, cur.x - selStart.x, cur.y - selStart.y);
+});
+
+selectCanvas.addEventListener("mouseup", async (e) => {
+  if (!selecting || !selStart) return;
+  selecting = false;
+  const rect = selectCanvas.getBoundingClientRect();
+  const scaleX = selectCanvas.width / rect.width;
+  const scaleY = selectCanvas.height / rect.height;
+  const end = { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+
+  const x = Math.min(selStart.x, end.x);
+  const y = Math.min(selStart.y, end.y);
+  const w = Math.abs(end.x - selStart.x);
+  const h = Math.abs(end.y - selStart.y);
+  selStart = null;
+  if (w < 8 || h < 8) return;
+
+  const cropCanvas = document.createElement("canvas");
+  cropCanvas.width = w;
+  cropCanvas.height = h;
+  cropCanvas.getContext("2d").drawImage(frameCanvas, x, y, w, h, 0, 0, w, h);
+
+  showCropPreview(cropCanvas);
+  await matchCrop(cropCanvas);
+});
+
+init();
+</script>
+</body>
+</html>
